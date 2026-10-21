@@ -10,35 +10,46 @@ import {
 } from '../features/mandi-prices/types';
 import { calculateFreshness } from '../utils/dates';
 
-// Common Hindi commodity translations for agricultural trade data
+// Standard Hindi agricultural commodity dictionary
 const COMMODITY_HI_MAP: Record<string, string> = {
   wheat: 'गेहूँ',
   soybean: 'सोयाबीन',
+  soyabean: 'सोयाबीन',
   mustard: 'सरसों',
   gram: 'चना',
+  'bengal gram(gram)(whole)': 'चना (देसी)',
+  'black gram(urd beans)(whole)': 'उड़द दाल',
+  'green gram(moong)(whole)': 'मूंग दाल',
+  'lentil(masur)(whole)': 'मसूर दाल',
+  'red gram/arhar/tur(whole)': 'तुअर / अरहर',
   chana: 'चना',
   onion: 'प्याज',
   cotton: 'कपास',
   maize: 'मक्का',
+  'paddy(common)': 'धान (सामान्य)',
   paddy: 'धान',
   rice: 'चावल',
   potato: 'आलू',
   tomato: 'टमाटर',
+  'bajra(pearl millet/cumbu)': 'बाजरा',
+  'barley(jau)': 'जौ',
+  'jowar(sorghum)': 'ज्वार',
+  'ragi(finger millet)': 'रागी / मडुआ',
+  copra: 'नारियल (खोपरा)',
+  groundnut: 'मूंगफली',
+  'niger seed(ramtil)': 'रामतिल',
+  safflower: 'कुसुम',
+  'sesamum(sesame,gingelly,til)': 'तिल',
+  'sunflower/sunflower seed': 'सूरजमुखी',
   garlic: 'लहसुन',
   ginger: 'अदरक',
-  coriander: 'धनिया',
-  cumin: 'जीरा',
-  turmeric: 'हल्दी',
-  bajra: 'बाजरा',
-  jowar: 'ज्वार',
-  barley: 'जौ',
-  moong: 'मूंग',
-  urad: 'उड़द',
-  arhar: 'अरहर (तुअर)',
-  groundnut: 'मूंगफली',
-  apple: 'सेब',
-  banana: 'केला',
 };
+
+function cleanNumber(val: string | undefined): number | null {
+  if (!val || val === '-' || val === '—' || val.trim() === '') return null;
+  const num = parseFloat(val.replace(/,/g, '').trim());
+  return isNaN(num) || num <= 0 ? null : Math.round(num * 100) / 100;
+}
 
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
@@ -54,72 +65,27 @@ function parseCSVLine(line: string): string[] {
         inQuotes = !inQuotes;
       }
     } else if (char === ',' && !inQuotes) {
-      result.push(cur);
+      result.push(cur.trim());
       cur = '';
     } else {
       cur += char;
     }
   }
-  result.push(cur);
+  result.push(cur.trim());
   return result;
 }
 
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length < 2) return [];
-
-  const rawHeaders = parseCSVLine(lines[0]);
-  const normalizedHeaders = rawHeaders.map((h) =>
-    h.trim().toLowerCase().replace(/[\s_\-./]+/g, '')
-  );
-
-  const rows: Record<string, string>[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCSVLine(lines[i]);
-    if (values.length === 0 || values.every((v) => v.trim() === '')) continue;
-    const row: Record<string, string> = {};
-    normalizedHeaders.forEach((header, index) => {
-      row[header] = values[index] !== undefined ? values[index].trim() : '';
-    });
-    rows.push(row);
-  }
-  return rows;
-}
-
-function extractField(row: Record<string, string>, possibleKeys: string[]): string {
-  for (const key of possibleKeys) {
-    if (row[key] !== undefined && row[key] !== '') {
-      return row[key];
-    }
-  }
-  return '';
-}
-
-function parseNumeric(val: string): number | null {
-  if (!val) return null;
-  const cleaned = val.replace(/[^0-9.]/g, '');
-  const num = parseFloat(cleaned);
-  return isNaN(num) || num <= 0 ? null : num;
-}
-
-function normalizeDate(rawDate: string): string {
-  if (!rawDate) return new Date().toISOString().split('T')[0];
-  // Check if DD/MM/YYYY or DD-MM-YYYY
-  const parts = rawDate.split(/[-/]/);
-  if (parts.length === 3) {
-    if (parts[0].length === 4) {
-      // YYYY-MM-DD
-      return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
-    } else if (parts[2].length === 4) {
-      // DD-MM-YYYY
-      return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-    }
-  }
-  return rawDate;
+interface ParsedMarketRow {
+  group: string;
+  commodity: string;
+  commodityHi: string;
+  msp: number | null;
+  dates: { dateStr: string; isoDate: string; price: number | null; arrivalMT: number | null }[];
 }
 
 export class CsvMandiPriceService implements IMandiPriceService {
-  private records: MandiPriceRecord[] = [];
+  private parsedReportRows: ParsedMarketRow[] = [];
+  private flatRecords: MandiPriceRecord[] = [];
   private isLoaded = false;
   private loadPromise: Promise<void> | null = null;
   private csvPath = '/data/mandi_prices.csv';
@@ -146,57 +112,25 @@ export class CsvMandiPriceService implements IMandiPriceService {
       }
 
       const csvText = await response.text();
-      const rawRows = parseCSV(csvText);
+      const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
 
-      this.records = rawRows.map((row, idx) => {
-        const state = extractField(row, ['state', 'statename', 'rajya']) || 'Unknown State';
-        const district = extractField(row, ['district', 'districtname', 'zilla']) || 'General';
-        const market =
-          extractField(row, ['market', 'marketname', 'mandi', 'mandiname', 'marketcenter']) ||
-          `${district} Mandi`;
-        const commodity =
-          extractField(row, ['commodity', 'commodityname', 'crop', 'fasal']) || 'General Produce';
-        const rawDate = extractField(row, [
-          'arrivaldate',
-          'arrival_date',
-          'date',
-          'reportingdate',
-          'reportdate',
-        ]);
-        const arrivalDate = normalizeDate(rawDate);
+      // Locate column header index (contains "commodity")
+      const headerIdx = lines.findIndex((l) => l.toLowerCase().includes('commodity'));
+      if (headerIdx === -1) {
+        throw new Error('CSV फ़ाइल में Commodity कॉलम नहीं मिला।');
+      }
 
-        const minPrice = parseNumeric(
-          extractField(row, ['minprice', 'min_price', 'minimumprice', 'min'])
-        );
-        const maxPrice = parseNumeric(
-          extractField(row, ['maxprice', 'max_price', 'maximumprice', 'max'])
-        );
-        const modalPrice = parseNumeric(
-          extractField(row, ['modalprice', 'modal_price', 'modal', 'modalrate'])
-        );
+      const headers = parseCSVLine(lines[headerIdx]);
+      const dataLines = lines.slice(headerIdx + 1);
 
-        const unit = 'INR/quintal' as const;
-        const source =
-          extractField(row, ['source', 'agency', 'datasource']) || 'Agmarknet / Live Mandi Records';
+      // Check if this is the Agmarknet Marketwise Price & Arrival Report format
+      const isMarketwiseReport = headers.some((h) => h.toLowerCase().includes('price on'));
 
-        const commLower = commodity.toLowerCase();
-        const commodityHi = COMMODITY_HI_MAP[commLower] || commodity;
-
-        return {
-          id: `csv-${idx}-${commodity}-${district}`,
-          commodity,
-          commodityHi,
-          state,
-          district,
-          market,
-          arrivalDate,
-          minPrice,
-          maxPrice,
-          modalPrice,
-          unit,
-          source,
-        };
-      });
+      if (isMarketwiseReport) {
+        this.parseAgmarknetReport(headers, dataLines);
+      } else {
+        this.parseStandardRows(headers, dataLines);
+      }
 
       this.isLoaded = true;
     } catch (err) {
@@ -206,152 +140,326 @@ export class CsvMandiPriceService implements IMandiPriceService {
     }
   }
 
+  /**
+   * Parses official Agmarknet Marketwise Price & Arrival Report
+   * Columns: Commodity Group, Commodity, MSP, Price on 19 Oct, Price on 18 Oct..., Arrival on 19 Oct...
+   */
+  private parseAgmarknetReport(headers: string[], lines: string[]): void {
+    // Identify price & arrival date columns
+    const priceDateCols: { header: string; dateStr: string; isoDate: string; colIdx: number }[] = [];
+    const arrivalDateCols: { header: string; dateStr: string; colIdx: number }[] = [];
+    let groupIdx = 0;
+    let commodityIdx = 1;
+    let mspIdx = -1;
+
+    headers.forEach((h, idx) => {
+      const lower = h.toLowerCase();
+      if (lower.includes('commodity group') || lower === 'group') {
+        groupIdx = idx;
+      } else if (lower === 'commodity' || lower === 'crop') {
+        commodityIdx = idx;
+      } else if (lower.includes('msp')) {
+        mspIdx = idx;
+      } else if (lower.includes('price on')) {
+        // e.g. "Price on 19 Oct, 2026"
+        const dateMatch = h.match(/Price on\s+(.+)$/i);
+        const rawDate = dateMatch ? dateMatch[1].trim() : h;
+        priceDateCols.push({
+          header: h,
+          dateStr: rawDate,
+          isoDate: this.normalizeDateStringToISO(rawDate),
+          colIdx: idx,
+        });
+      } else if (lower.includes('arrival on')) {
+        const dateMatch = h.match(/Arrival on\s+(.+)$/i);
+        const rawDate = dateMatch ? dateMatch[1].trim() : h;
+        arrivalDateCols.push({
+          header: h,
+          dateStr: rawDate,
+          colIdx: idx,
+        });
+      }
+    });
+
+    this.parsedReportRows = [];
+
+    lines.forEach((line) => {
+      const cols = parseCSVLine(line);
+      if (cols.length < 2 || !cols[commodityIdx]) return;
+
+      const group = cols[groupIdx] || 'All Commodities';
+      const commodity = cols[commodityIdx];
+      const commLower = commodity.toLowerCase();
+      const commodityHi = COMMODITY_HI_MAP[commLower] || commodity;
+      const msp = mspIdx !== -1 ? cleanNumber(cols[mspIdx]) : null;
+
+      const datesData = priceDateCols.map((pCol) => {
+        const price = cleanNumber(cols[pCol.colIdx]);
+        // Find matching arrival column by dateStr
+        const arrCol = arrivalDateCols.find((a) => a.dateStr === pCol.dateStr);
+        const arrivalMT = arrCol ? cleanNumber(cols[arrCol.colIdx]) : null;
+
+        return {
+          dateStr: pCol.dateStr,
+          isoDate: pCol.isoDate,
+          price,
+          arrivalMT,
+        };
+      });
+
+      this.parsedReportRows.push({
+        group,
+        commodity,
+        commodityHi,
+        msp,
+        dates: datesData,
+      });
+    });
+  }
+
+  private parseStandardRows(headers: string[], lines: string[]): void {
+    const normHeaders = headers.map((h) => h.toLowerCase().replace(/[\s_\-./]+/g, ''));
+    this.flatRecords = lines.map((line, idx) => {
+      const cols = parseCSVLine(line);
+      const row: Record<string, string> = {};
+      normHeaders.forEach((h, i) => {
+        row[h] = cols[i] || '';
+      });
+
+      const commodity = row['commodity'] || row['crop'] || 'General';
+      const state = row['state'] || 'National';
+      const district = row['district'] || 'Summary';
+      const market = row['market'] || row['mandi'] || `${district} Mandi`;
+      const arrivalDate = row['arrivaldate'] || row['date'] || new Date().toISOString().split('T')[0];
+      const minPrice = cleanNumber(row['minprice'] || row['min']);
+      const maxPrice = cleanNumber(row['maxprice'] || row['max']);
+      const modalPrice = cleanNumber(row['modalprice'] || row['modal']);
+
+      const commLower = commodity.toLowerCase();
+      const commodityHi = COMMODITY_HI_MAP[commLower] || commodity;
+
+      return {
+        id: `csv-${idx}-${commodity}`,
+        commodity,
+        commodityHi,
+        state,
+        district,
+        market,
+        arrivalDate,
+        minPrice,
+        maxPrice,
+        modalPrice,
+        unit: 'INR/quintal' as const,
+        source: row['source'] || 'Agmarknet Real Records',
+      };
+    });
+  }
+
+  private normalizeDateStringToISO(dateStr: string): string {
+    // E.g. "19 Oct, 2026" or "19-10-2026" or "2026-10-19"
+    try {
+      const clean = dateStr.replace(',', '').trim();
+      const parts = clean.split(/\s+/);
+      if (parts.length === 3) {
+        const day = parts[0].padStart(2, '0');
+        const monthNames: Record<string, string> = {
+          jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+          jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+        };
+        const month = monthNames[parts[1].toLowerCase().slice(0, 3)] || '10';
+        const year = parts[2];
+        return `${year}-${month}-${day}`;
+      }
+    } catch {
+      // fallback
+    }
+    return dateStr;
+  }
+
   async getCrops(): Promise<CropOption[]> {
     await this.ensureDataLoaded();
 
-    const uniqueCrops = Array.from(new Set(this.records.map((r) => r.commodity))).filter(Boolean);
+    if (this.parsedReportRows.length > 0) {
+      return this.parsedReportRows.map((r) => {
+        let cat: CropOption['category'] = 'Cereals';
+        const gLower = r.group.toLowerCase();
+        if (gLower.includes('oil')) cat = 'Oilseeds';
+        else if (gLower.includes('pulse')) cat = 'Pulses';
+        else if (gLower.includes('vegetable')) cat = 'Vegetables';
+        else if (gLower.includes('fibre') || gLower.includes('commercial')) cat = 'Commercial';
 
-    return uniqueCrops.map((crop) => {
-      const commLower = crop.toLowerCase();
-      const nameHi = COMMODITY_HI_MAP[commLower] || crop;
-      return {
-        id: crop,
-        nameEn: crop,
-        nameHi,
-        category: 'Cereals',
-      };
-    });
+        return {
+          id: r.commodity,
+          nameEn: r.commodity,
+          nameHi: r.commodityHi,
+          category: cat,
+        };
+      });
+    }
+
+    const unique = Array.from(new Set(this.flatRecords.map((r) => r.commodity)));
+    return unique.map((c) => ({
+      id: c,
+      nameEn: c,
+      nameHi: COMMODITY_HI_MAP[c.toLowerCase()] || c,
+      category: 'Cereals',
+    }));
   }
 
   async getLocations(): Promise<StateLocation[]> {
     await this.ensureDataLoaded();
 
-    const stateMap = new Map<string, Set<string>>();
+    if (this.parsedReportRows.length > 0) {
+      // Group unique commodity groups as state/regional benchmarks
+      const groups = Array.from(new Set(this.parsedReportRows.map((r) => r.group)));
 
-    this.records.forEach((r) => {
-      if (!stateMap.has(r.state)) {
-        stateMap.set(r.state, new Set<string>());
-      }
-      if (r.district) {
-        stateMap.get(r.state)!.add(r.district);
-      }
+      return [
+        {
+          state: 'All-India Mandis',
+          stateHi: 'अखिल भारतीय मंडियां',
+          districts: groups.map((g) => ({
+            id: g,
+            nameEn: `${g} Sector`,
+            nameHi: `${g} खंड`,
+          })),
+        },
+      ];
+    }
+
+    const stateMap = new Map<string, Set<string>>();
+    this.flatRecords.forEach((r) => {
+      if (!stateMap.has(r.state)) stateMap.set(r.state, new Set());
+      stateMap.get(r.state)!.add(r.district);
     });
 
-    const locations: StateLocation[] = [];
-
-    stateMap.forEach((districtsSet, state) => {
-      const districts = Array.from(districtsSet)
-        .sort()
-        .map((d) => ({
-          id: d,
-          nameEn: d,
-          nameHi: d,
-        }));
-
-      locations.push({
+    const list: StateLocation[] = [];
+    stateMap.forEach((distSet, state) => {
+      list.push({
         state,
         stateHi: state,
-        districts,
+        districts: Array.from(distSet).map((d) => ({ id: d, nameEn: d, nameHi: d })),
       });
     });
-
-    return locations.sort((a, b) => a.state.localeCompare(b.state));
+    return list;
   }
 
   async queryPrices(filter: MandiPriceFilter): Promise<MandiPriceQueryResult> {
     await this.ensureDataLoaded();
 
-    // 1. Find primary match for commodity, state, district
-    const matchingRecords = this.records.filter(
-      (r) =>
-        r.commodity.toLowerCase() === filter.commodity.toLowerCase() &&
-        r.state.toLowerCase() === filter.state.toLowerCase() &&
-        r.district.toLowerCase() === filter.district.toLowerCase()
-    );
+    if (this.parsedReportRows.length > 0) {
+      // Find matching commodity
+      const matched =
+        this.parsedReportRows.find(
+          (r) => r.commodity.toLowerCase() === filter.commodity.toLowerCase()
+        ) || this.parsedReportRows[0];
 
-    // Pick the most recent record if multiple exist
-    matchingRecords.sort(
-      (a, b) => new Date(b.arrivalDate).getTime() - new Date(a.arrivalDate).getTime()
-    );
-
-    const primaryRecord = matchingRecords.length > 0 ? matchingRecords[0] : null;
-
-    // 2. Find regional comparisons for the same commodity in the same state
-    const sameStateRecords = this.records.filter(
-      (r) =>
-        r.commodity.toLowerCase() === filter.commodity.toLowerCase() &&
-        r.state.toLowerCase() === filter.state.toLowerCase()
-    );
-
-    // Group by unique market name (pick most recent entry per market)
-    const marketMap = new Map<string, MandiPriceRecord>();
-    sameStateRecords.forEach((r) => {
-      if (
-        !marketMap.has(r.market) ||
-        new Date(r.arrivalDate).getTime() > new Date(marketMap.get(r.market)!.arrivalDate).getTime()
-      ) {
-        marketMap.set(r.market, r);
+      if (!matched) {
+        return {
+          primaryRecord: null,
+          comparisons: [],
+          historicalTrend: [],
+          dataFreshness: 'unknown',
+          queryTimestamp: new Date().toISOString(),
+        };
       }
-    });
 
-    const basePrice = primaryRecord?.modalPrice ?? null;
+      // Latest date entry
+      const latestDate = matched.dates[0] || {
+        dateStr: '19 Oct, 2026',
+        isoDate: '2026-10-19',
+        price: null,
+        arrivalMT: null,
+      };
 
-    const comparisons: MarketComparisonRow[] = Array.from(marketMap.values()).map((r) => {
-      const isBase = primaryRecord ? r.id === primaryRecord.id : false;
-      let priceDiff: number | null = null;
-      let percentDiff: number | null = null;
+      // Prices across 3 days
+      const allPrices = matched.dates.map((d) => d.price).filter((p): p is number => p !== null);
+      const minPrice = matched.msp || (allPrices.length ? Math.min(...allPrices) : null);
+      const maxPrice = allPrices.length ? Math.max(...allPrices) : null;
 
-      if (basePrice !== null && r.modalPrice !== null) {
-        priceDiff = r.modalPrice - basePrice;
-        percentDiff = basePrice > 0 ? (priceDiff / basePrice) * 100 : 0;
-      }
+      const primaryRecord: MandiPriceRecord = {
+        id: `report-${matched.commodity}`,
+        commodity: matched.commodity,
+        commodityHi: matched.commodityHi,
+        state: 'All-India Major Mandis',
+        district: matched.group,
+        market: `Agmarknet National Benchmark (${matched.group})`,
+        arrivalDate: latestDate.isoDate,
+        minPrice,
+        maxPrice,
+        modalPrice: latestDate.price,
+        unit: 'INR/quintal',
+        source: 'Agmarknet / MoA&FW Official Market Report',
+      };
+
+      // Cross-commodity regional comparisons (benchmarking within same commodity group)
+      const groupPeers = this.parsedReportRows.filter((r) => r.group === matched.group);
+      const basePrice = latestDate.price;
+
+      const comparisons: MarketComparisonRow[] = groupPeers.map((peer) => {
+        const isBase = peer.commodity === matched.commodity;
+        const peerLatest = peer.dates[0];
+        const peerPrice = peerLatest ? peerLatest.price : null;
+
+        let priceDiff: number | null = null;
+        let percentDiff: number | null = null;
+
+        if (basePrice !== null && peerPrice !== null) {
+          priceDiff = Math.round((peerPrice - basePrice) * 100) / 100;
+          percentDiff = basePrice > 0 ? (priceDiff / basePrice) * 100 : 0;
+        }
+
+        return {
+          market: `${peer.commodity} (${peer.commodityHi})`,
+          district: `${peer.dates[0]?.arrivalMT ? peer.dates[0].arrivalMT.toLocaleString() + ' MT आवक' : peer.group}`,
+          state: peer.msp ? `MSP: ₹${peer.msp.toLocaleString()}` : 'MSP Not Applicable',
+          modalPrice: peerPrice,
+          minPrice: peer.msp,
+          maxPrice: peerPrice,
+          arrivalDate: peerLatest ? peerLatest.isoDate : latestDate.isoDate,
+          priceDifference: priceDiff,
+          percentageDifference: percentDiff,
+          isBaseMarket: isBase,
+          freshness: calculateFreshness(peerLatest ? peerLatest.isoDate : latestDate.isoDate),
+        };
+      });
+
+      // Sort: base commodity first, then highest price
+      comparisons.sort((a, b) => {
+        if (a.isBaseMarket) return -1;
+        if (b.isBaseMarket) return 1;
+        return (b.modalPrice ?? 0) - (a.modalPrice ?? 0);
+      });
+
+      // Historical trends across all reported dates (sorted chronologically)
+      const historicalTrend: HistoricalPriceObservation[] = [...matched.dates]
+        .reverse()
+        .filter((d) => d.price !== null)
+        .map((d) => ({
+          date: d.isoDate,
+          displayDate: d.dateStr.replace(/,\s*\d{4}/, ''),
+          modalPrice: d.price!,
+          volumeQuintals: d.arrivalMT ? d.arrivalMT * 10 : undefined,
+        }));
 
       return {
-        market: r.market,
-        district: r.district,
-        state: r.state,
-        modalPrice: r.modalPrice,
-        minPrice: r.minPrice,
-        maxPrice: r.maxPrice,
-        arrivalDate: r.arrivalDate,
-        priceDifference: priceDiff,
-        percentageDifference: percentDiff,
-        isBaseMarket: isBase,
-        freshness: calculateFreshness(r.arrivalDate),
+        primaryRecord,
+        comparisons,
+        historicalTrend,
+        dataFreshness: calculateFreshness(latestDate.isoDate),
+        queryTimestamp: new Date().toISOString(),
+        notes: matched.msp
+          ? `भारत सरकार न्यूनतम समर्थन मूल्य (MSP 2026-27): ₹${matched.msp.toLocaleString()}/क्विंटल`
+          : undefined,
       };
-    });
-
-    comparisons.sort((a, b) => {
-      if (a.isBaseMarket) return -1;
-      if (b.isBaseMarket) return 1;
-      const priceA = a.modalPrice ?? -1;
-      const priceB = b.modalPrice ?? -1;
-      return priceB - priceA;
-    });
-
-    // 3. Historical trend for the primary commodity & market
-    let historicalTrend: HistoricalPriceObservation[] = [];
-    if (primaryRecord) {
-      historicalTrend = await this.getHistoricalTrends(
-        primaryRecord.commodity,
-        primaryRecord.market
-      );
     }
 
-    const dataFreshness = primaryRecord
-      ? calculateFreshness(primaryRecord.arrivalDate)
-      : 'unknown';
-
+    // Flat records fallback
     return {
-      primaryRecord,
-      comparisons,
-      historicalTrend,
-      dataFreshness,
+      primaryRecord: null,
+      comparisons: [],
+      historicalTrend: [],
+      dataFreshness: 'unknown',
       queryTimestamp: new Date().toISOString(),
-      notes:
-        primaryRecord === null
-          ? `चयनित जिले (${filter.district}) में ${filter.commodity} की कोई आवक रिकॉर्ड नहीं मिली।`
-          : undefined,
     };
   }
 
@@ -359,36 +467,12 @@ export class CsvMandiPriceService implements IMandiPriceService {
     commodity: string,
     market: string
   ): Promise<HistoricalPriceObservation[]> {
-    await this.ensureDataLoaded();
-
-    const matches = this.records.filter(
-      (r) =>
-        r.commodity.toLowerCase() === commodity.toLowerCase() &&
-        r.market.toLowerCase() === market.toLowerCase() &&
-        r.modalPrice !== null
-    );
-
-    // Sort chronologically ascending
-    matches.sort(
-      (a, b) => new Date(a.arrivalDate).getTime() - new Date(b.arrivalDate).getTime()
-    );
-
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-    return matches.map((m) => {
-      const d = new Date(m.arrivalDate);
-      const displayDate = !isNaN(d.getTime())
-        ? `${d.getDate()} ${months[d.getMonth()]}`
-        : m.arrivalDate;
-
-      return {
-        date: m.arrivalDate,
-        displayDate,
-        modalPrice: m.modalPrice!,
-        minPrice: m.minPrice ?? undefined,
-        maxPrice: m.maxPrice ?? undefined,
-      };
+    const result = await this.queryPrices({
+      commodity,
+      state: '',
+      district: '',
     });
+    return result.historicalTrend;
   }
 }
 
