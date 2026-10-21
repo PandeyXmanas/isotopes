@@ -1,11 +1,10 @@
 import { IMandiPriceService } from '../features/mandi-prices/types';
-import { mockMandiPriceService } from './mockMandiPriceService';
+import { csvMandiPriceService } from './csvMandiPriceService';
 
 /**
  * Service Accessor
- * Member 2 can replace `mockMandiPriceService` with `ApiMandiPriceService`
- * to connect live Agmarknet / e-NAM feeds.
+ * Connected directly to real dataset under public/data/mandi_prices.csv
  */
-export const mandiPriceService: IMandiPriceService = mockMandiPriceService;
+export const mandiPriceService: IMandiPriceService = csvMandiPriceService;
 
-export * from './mockMandiPriceService';
+export * from './csvMandiPriceService';

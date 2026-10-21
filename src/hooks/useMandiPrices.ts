@@ -31,7 +31,7 @@ export function useMandiPrices(): UseMandiPricesReturn {
   const [locations, setLocations] = useState<StateLocation[]>([]);
   const [lang, setLang] = useState<'en' | 'hi'>('hi');
 
-  // Load static crops and locations metadata once
+  // Load crops and locations from real CSV records
   useEffect(() => {
     let mounted = true;
 
@@ -41,12 +41,58 @@ export function useMandiPrices(): UseMandiPricesReturn {
           mandiPriceService.getCrops(),
           mandiPriceService.getLocations(),
         ]);
+
         if (mounted) {
           setCrops(cropsData);
           setLocations(locationsData);
+
+          // If current filter does not match real data, dynamically align with available CSV records
+          if (cropsData.length > 0 && locationsData.length > 0) {
+            setFilter((prev) => {
+              const hasCrop = cropsData.some(
+                (c) => c.id.toLowerCase() === prev.commodity.toLowerCase()
+              );
+              const validState =
+                locationsData.find(
+                  (l) => l.state.toLowerCase() === prev.state.toLowerCase()
+                ) || locationsData[0];
+
+              const validDistrict =
+                validState.districts.find(
+                  (d) => d.id.toLowerCase() === prev.district.toLowerCase()
+                ) || validState.districts[0];
+
+              const targetCrop = hasCrop ? prev.commodity : cropsData[0].id;
+              const targetState = validState.state;
+              const targetDistrict = validDistrict ? validDistrict.id : '';
+
+              if (
+                targetCrop !== prev.commodity ||
+                targetState !== prev.state ||
+                targetDistrict !== prev.district
+              ) {
+                return {
+                  commodity: targetCrop,
+                  state: targetState,
+                  district: targetDistrict,
+                };
+              }
+              return prev;
+            });
+          }
         }
-      } catch (err) {
-        console.error('Failed to load crop/location metadata:', err);
+      } catch (err: unknown) {
+        console.error('Failed to load crop/location metadata from CSV:', err);
+        if (mounted) {
+          const msg =
+            err instanceof Error
+              ? err.message
+              : 'public/data/mandi_prices.csv लोड करने में समस्या आई।';
+          setError(
+            `${msg} (कृपया सुनिश्चित करें कि अन्य डिवाइस से public/data/mandi_prices.csv को push किया गया है)`
+          );
+          setIsLoading(false);
+        }
       }
     }
 
@@ -81,7 +127,10 @@ export function useMandiPrices(): UseMandiPricesReturn {
   );
 
   useEffect(() => {
-    fetchPrices(filter);
+    // Only query if filter is set
+    if (filter.commodity && filter.state) {
+      fetchPrices(filter);
+    }
   }, [filter, fetchPrices]);
 
   const updateFilter = useCallback((partial: Partial<MandiPriceFilter>) => {
