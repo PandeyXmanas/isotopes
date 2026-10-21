@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { Upload, PlusCircle, FileText, CheckCircle2, AlertCircle } from "lucide-react";
+import { csvMandiPriceService } from '../../services/csvMandiPriceService';
+import { MandiPriceRecord } from '../../features/mandi-prices/types';
 
 export interface MandiPriceInput {
   commodity: string;
@@ -16,7 +18,7 @@ export interface MandiPriceInput {
 
 export interface AddDataProps {
   onAddRecord?: (record: MandiPriceInput) => void;
-  onImportCsv?: (records: MandiPriceInput[]) => void;
+  onImportCsv?: (records: MandiPriceRecord[]) => void;
 }
 
 export const AddData: React.FC<AddDataProps> = ({ onAddRecord, onImportCsv }) => {
@@ -72,38 +74,7 @@ export const AddData: React.FC<AddDataProps> = ({ onAddRecord, onImportCsv }) =>
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
-        const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
-
-        if (lines.length <= 1) {
-          throw new Error("CSV file has no data rows.");
-        }
-
-        const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
-        const records: MandiPriceInput[] = [];
-
-        for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(",").map((c) => c.trim());
-          if (cols.length < headers.length) continue;
-
-          const row: Record<string, string> = {};
-          headers.forEach((h, idx) => {
-            row[h] = cols[idx];
-          });
-
-          records.push({
-            commodity: row["commodity"] || row["crop"] || "Unknown",
-            state: row["state"] || "",
-            district: row["district"] || "",
-            market: row["market"] || row["mandi"] || "",
-            arrivalDate: row["arrivaldate"] || row["date"] || new Date().toISOString().split("T")[0],
-            minPrice: row["minprice"] ? parseFloat(row["minprice"]) : null,
-            maxPrice: row["maxprice"] ? parseFloat(row["maxprice"]) : null,
-            modalPrice: row["modalprice"] ? parseFloat(row["modalprice"]) : null,
-            unit: "INR/quintal",
-            source: row["source"] || "Imported CSV",
-          });
-        }
-
+        const records = csvMandiPriceService.importCsv(text);
         setCsvStatus(`Successfully loaded ${records.length} records from ${file.name}`);
         onImportCsv?.(records);
       } catch (err: unknown) {
@@ -162,7 +133,7 @@ export const AddData: React.FC<AddDataProps> = ({ onAddRecord, onImportCsv }) =>
               Select or Drop Mandi Price CSV
             </span>
             <span className="text-xs text-stone-500 text-center max-w-xs mb-3">
-              CSV columns: Commodity, State, District, Market, ArrivalDate, MinPrice, MaxPrice, ModalPrice
+              Supports mandi CSVs and the Marketwise Price & Arrival Report format.
             </span>
             <input
               type="file"

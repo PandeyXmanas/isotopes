@@ -55,6 +55,7 @@ export interface DistrictOption {
   id: string;
   nameEn: string;
   nameHi: string;
+  markets?: string[];
 }
 
 export interface StateLocation {
@@ -67,6 +68,7 @@ export interface MandiPriceFilter {
   commodity: string;
   state: string;
   district: string;
+  market?: string;
 }
 
 export interface MandiPriceQueryResult {

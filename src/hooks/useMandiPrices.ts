@@ -18,6 +18,7 @@ export interface UseMandiPricesReturn {
   crops: CropOption[];
   locations: StateLocation[];
   refetch: () => Promise<void>;
+  refreshCatalog: () => Promise<void>;
   lang: 'en' | 'hi';
   setLang: (lang: 'en' | 'hi') => void;
 }
@@ -61,6 +62,9 @@ export function useMandiPrices(): UseMandiPricesReturn {
                 validState.districts.find(
                   (d) => d.id.toLowerCase() === prev.district.toLowerCase()
                 ) || validState.districts[0];
+              const validMarket = validDistrict?.markets?.find(
+                (market) => market.toLowerCase() === prev.market?.toLowerCase()
+              ) || validDistrict?.markets?.[0] || '';
 
               const targetCrop = hasCrop ? prev.commodity : cropsData[0].id;
               const targetState = validState.state;
@@ -69,12 +73,14 @@ export function useMandiPrices(): UseMandiPricesReturn {
               if (
                 targetCrop !== prev.commodity ||
                 targetState !== prev.state ||
-                targetDistrict !== prev.district
+                targetDistrict !== prev.district ||
+                validMarket !== (prev.market ?? '')
               ) {
                 return {
                   commodity: targetCrop,
                   state: targetState,
                   district: targetDistrict,
+                  market: validMarket,
                 };
               }
               return prev;
@@ -144,6 +150,22 @@ export function useMandiPrices(): UseMandiPricesReturn {
     await fetchPrices(filter);
   }, [fetchPrices, filter]);
 
+  const refreshCatalog = useCallback(async () => {
+    const [cropsData, locationsData] = await Promise.all([
+      mandiPriceService.getCrops(), mandiPriceService.getLocations(),
+    ]);
+    setCrops(cropsData);
+    setLocations(locationsData);
+    const nextCrop = cropsData.find((crop) => crop.id.toLowerCase() === filter.commodity.toLowerCase())?.id ?? cropsData[0]?.id ?? '';
+    const nextLocation = locationsData.find((location) => location.state.toLowerCase() === filter.state.toLowerCase()) ?? locationsData[0];
+    const nextDistrict = nextLocation?.districts.find((district) => district.id.toLowerCase() === filter.district.toLowerCase())?.id ?? nextLocation?.districts[0]?.id ?? '';
+    const districtOption = nextLocation?.districts.find((district) => district.id === nextDistrict);
+    const nextMarket = districtOption?.markets?.find((market) => market.toLowerCase() === filter.market?.toLowerCase()) ?? districtOption?.markets?.[0] ?? '';
+    const nextFilter = { commodity: nextCrop, state: nextLocation?.state ?? '', district: nextDistrict, market: nextMarket };
+    setFilter(nextFilter);
+    await fetchPrices(nextFilter);
+  }, [fetchPrices, filter]);
+
   return {
     filter,
     setFilter,
@@ -154,6 +176,7 @@ export function useMandiPrices(): UseMandiPricesReturn {
     crops,
     locations,
     refetch,
+    refreshCatalog,
     lang,
     setLang,
   };

@@ -3,7 +3,6 @@ import { MandiPriceFilter, CropOption, StateLocation } from '../../features/mand
 import { CropSelector } from './CropSelector';
 import { LocationSelector } from './LocationSelector';
 import { Search, RotateCcw, Filter } from 'lucide-react';
-import { DEFAULT_FILTER } from '../../features/mandi-prices/constants';
 
 interface PriceFiltersProps {
   filter: MandiPriceFilter;
@@ -32,21 +31,38 @@ export const PriceFilters: React.FC<PriceFiltersProps> = ({
   };
 
   const handleStateChange = (state: string) => {
+    const nextState = locations.find((location) => location.state === state);
+    const nextDistrict = nextState?.districts[0];
     onFilterChange({
       ...filter,
       state,
+      district: nextDistrict?.id ?? '',
+      market: nextDistrict?.markets?.[0] ?? '',
     });
   };
 
   const handleDistrictChange = (district: string) => {
+    const nextDistrict = locations.find((location) => location.state === filter.state)?.districts.find((option) => option.id === district);
     onFilterChange({
       ...filter,
       district,
+      market: nextDistrict?.markets?.[0] ?? '',
     });
   };
 
+  const handleMarketChange = (market: string) => {
+    const nextDistrict = locations.find((location) => location.state === filter.state)?.districts.find((district) => district.markets?.includes(market));
+    onFilterChange({ ...filter, market, district: nextDistrict?.id ?? filter.district });
+  };
+
   const handleReset = () => {
-    onFilterChange(DEFAULT_FILTER);
+    const firstLocation = locations[0];
+    onFilterChange({
+      commodity: crops[0]?.id ?? '',
+      state: firstLocation?.state ?? '',
+      district: firstLocation?.districts[0]?.id ?? '',
+      market: firstLocation?.districts[0]?.markets?.[0] ?? '',
+    });
   };
 
   return (
@@ -82,8 +98,10 @@ export const PriceFilters: React.FC<PriceFiltersProps> = ({
         <LocationSelector
           selectedState={filter.state}
           selectedDistrict={filter.district}
+          selectedMarket={filter.market ?? ''}
           onStateChange={handleStateChange}
           onDistrictChange={handleDistrictChange}
+          onMarketChange={handleMarketChange}
           locations={locations}
           lang={lang}
           disabled={isLoading}
