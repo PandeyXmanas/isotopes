@@ -1,128 +1,145 @@
 import React from 'react';
 import { useMandiPrices } from '../hooks/useMandiPrices';
+import { PageContainer } from '../components/layout/PageContainer';
+import { AppHeader } from '../components/layout/AppHeader';
+import { AppFooter } from '../components/layout/AppFooter';
+import { PriceFilters } from '../components/filters/PriceFilters';
+import { LoadingState } from '../components/ui/LoadingState';
+import { ErrorState } from '../components/ui/ErrorState';
+import { EmptyState } from '../components/ui/EmptyState';
+import { DataFreshnessBadge } from '../components/ui/DataFreshnessBadge';
 import { formatINRPerQuintal } from '../utils/currency';
-import { formatDateDisplay, getFreshnessBadgeMeta } from '../utils/dates';
+import { formatDateDisplay } from '../utils/dates';
+import { DEFAULT_FILTER } from '../features/mandi-prices/constants';
 
 export const App: React.FC = () => {
   const {
     filter,
-    updateFilter,
+    setFilter,
     data,
     isLoading,
     error,
     crops,
     locations,
+    refetch,
     lang,
     setLang,
   } = useMandiPrices();
 
-  const freshnessMeta = data ? getFreshnessBadgeMeta(data.dataFreshness, lang) : null;
-
   return (
-    <div className="min-h-screen bg-stone-100 flex flex-col items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-md p-6 max-w-lg w-full border border-stone-200">
-        {/* Header & Lang Toggle */}
-        <div className="flex items-center justify-between border-b border-stone-100 pb-3 mb-4">
-          <div className="flex items-center space-x-2">
-            <span className="text-2xl">🌾</span>
-            <div>
-              <h1 className="text-lg font-bold text-stone-900 leading-tight">
-                आज क्या भाव बिक रहा है?
-              </h1>
-              <p className="text-xs text-stone-500">
-                What Is It Selling For Today?
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setLang(lang === 'hi' ? 'en' : 'hi')}
-            className="text-xs font-semibold px-2.5 py-1 rounded-full bg-stone-100 text-stone-700 hover:bg-stone-200 border border-stone-300"
-          >
-            {lang === 'hi' ? 'English' : 'हिंदी'}
-          </button>
+    <div className="min-h-screen bg-stone-50 flex flex-col font-sans">
+      {/* App Header with Brand & Language Toggle */}
+      <AppHeader
+        currentLang={lang}
+        onLanguageChange={setLang}
+        isDemoMode={true}
+      />
+
+      {/* Main Responsive Body Container */}
+      <PageContainer>
+        {/* Milestone Indicator */}
+        <div className="bg-emerald-50 text-emerald-800 text-xs px-3 py-2 rounded-xl font-medium border border-emerald-200/90 flex items-center justify-between">
+          <span>✓ Milestone 3 Active: Shell, UI States & Cascading Filters</span>
+          <span className="text-[11px] font-bold bg-emerald-100/80 px-2 py-0.5 rounded-md">
+            {lang === 'hi' ? 'सक्रिय' : 'Live'}
+          </span>
         </div>
 
-        {/* Milestone 2 status pill */}
-        <div className="mb-4 bg-emerald-50 text-emerald-800 text-xs px-3 py-2 rounded-lg font-medium border border-emerald-200 flex items-center justify-between">
-          <span>✓ Milestone 2 Active: Domain Types & Reactive Hook Verified</span>
-          {isLoading && <span className="animate-pulse font-bold">लोड हो रहा है...</span>}
-        </div>
+        {/* Filter Card */}
+        <PriceFilters
+          filter={filter}
+          onFilterChange={setFilter}
+          crops={crops}
+          locations={locations}
+          isLoading={isLoading}
+          onSearch={refetch}
+          lang={lang}
+        />
 
-        {/* Quick filter tester */}
-        <div className="space-y-3 mb-5">
-          <label className="block text-xs font-bold text-stone-600 uppercase tracking-wider">
-            {lang === 'hi' ? 'फसल चुनें (त्वरित टेस्ट)' : 'Select Commodity'}
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {crops.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => updateFilter({ commodity: c.id })}
-                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                  filter.commodity === c.id
-                    ? 'bg-emerald-700 text-white shadow-sm'
-                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-                }`}
-              >
-                {lang === 'hi' ? c.nameHi : c.nameEn}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2 pt-1 text-xs text-stone-600">
-            <span className="font-semibold">स्थान / Location:</span>
-            <span>{filter.district}, {filter.state}</span>
-          </div>
-        </div>
-
-        {/* Price hero preview from hook */}
-        {error ? (
-          <div className="p-4 bg-red-50 text-red-700 rounded-xl text-sm border border-red-200">
-            {error}
-          </div>
-        ) : data?.primaryRecord ? (
-          <div className="bg-stone-50 rounded-xl p-4 border border-stone-200">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-stone-500">
-                {data.primaryRecord.market}
-              </span>
-              {freshnessMeta && (
-                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${freshnessMeta.badgeClass}`}>
-                  {freshnessMeta.label}
-                </span>
-              )}
-            </div>
-
-            <div className="text-3xl font-extrabold text-stone-900 mb-1">
-              {formatINRPerQuintal(data.primaryRecord.modalPrice)}
-            </div>
-
-            <div className="text-xs text-stone-500 flex justify-between pt-2 border-t border-stone-200">
-              <span>न्यूनतम / Min: ₹{data.primaryRecord.minPrice}</span>
-              <span>अधिकतम / Max: ₹{data.primaryRecord.maxPrice}</span>
-              <span>तारीख: {formatDateDisplay(data.primaryRecord.arrivalDate, lang)}</span>
-            </div>
-
-            <div className="mt-3 pt-2 text-[11px] text-stone-400 text-right">
-              स्रोतः {data.primaryRecord.source}
-            </div>
-          </div>
+        {/* Content Section: Loading, Error, Empty, or Hero Rate Preview */}
+        {isLoading ? (
+          <LoadingState
+            message={
+              lang === 'hi'
+                ? 'मंडी नीलामी डेटा लोड हो रहा है...'
+                : 'Loading mandi auction records...'
+            }
+          />
+        ) : error ? (
+          <ErrorState
+            message={error}
+            onRetry={refetch}
+            lang={lang}
+          />
+        ) : !data?.primaryRecord ? (
+          <EmptyState
+            title={
+              lang === 'hi'
+                ? `${filter.district} में ${filter.commodity} की कोई आवक नहीं`
+                : `No arrivals for ${filter.commodity} in ${filter.district}`
+            }
+            message={
+              data?.notes ||
+              (lang === 'hi'
+                ? 'चयनित जिले की मंडी में आज इस फसल की आवक दर्ज नहीं हुई है। निकटवर्ती जिले या दूसरी फसल चुनें।'
+                : 'No auction arrivals were reported for this crop today in the selected district.')
+            }
+            onResetFilters={() => setFilter(DEFAULT_FILTER)}
+            lang={lang}
+          />
         ) : (
-          <div className="p-4 bg-amber-50 text-amber-800 rounded-xl text-xs border border-amber-200">
-            {data?.notes || 'चयनित फसल की इस मंडी में आवक दर्ज नहीं है।'}
-          </div>
-        )}
+          /* Interim Price Display (Upgraded in Milestone 4) */
+          <div className="bg-white rounded-2xl p-5 border border-stone-200/90 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
+                  {lang === 'hi' ? 'प्राथमिक मंडी' : 'Primary Market'}
+                </span>
+                <h2 className="text-base font-bold text-stone-900">
+                  {data.primaryRecord.market}
+                </h2>
+              </div>
+              <DataFreshnessBadge
+                arrivalDate={data.primaryRecord.arrivalDate}
+                lang={lang}
+              />
+            </div>
 
-        {/* Regional Mandis Count */}
-        {data && data.comparisons.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-stone-100 text-xs text-stone-600 flex justify-between items-center">
-            <span>समान राज्य की तुलनात्मक मंडियां:</span>
-            <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-              {data.comparisons.length} मंडियां उपलब्ध
-            </span>
+            <div className="bg-stone-50 rounded-xl p-4 border border-stone-100">
+              <div className="text-xs font-semibold text-stone-500 mb-1">
+                {lang === 'hi' ? 'मॉडल भाव (Modal Auction Rate)' : 'Modal Auction Price'}
+              </div>
+              <div className="text-3xl font-extrabold text-stone-900 tracking-tight">
+                {formatINRPerQuintal(data.primaryRecord.modalPrice)}
+              </div>
+              <div className="text-xs text-stone-500 mt-2 flex flex-wrap justify-between gap-2 pt-2 border-t border-stone-200/70">
+                <span>न्यूनतम / Min: ₹{data.primaryRecord.minPrice ?? '—'}</span>
+                <span>अधिकतम / Max: ₹{data.primaryRecord.maxPrice ?? '—'}</span>
+                <span>तारीख / Date: {formatDateDisplay(data.primaryRecord.arrivalDate, lang)}</span>
+              </div>
+            </div>
+
+            {data.comparisons.length > 0 && (
+              <div className="text-xs text-stone-600 flex justify-between items-center pt-1">
+                <span>
+                  {lang === 'hi'
+                    ? `तुलनात्मक मंडियां उपलब्ध:`
+                    : 'Benchmark mandis available:'}
+                </span>
+                <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  {data.comparisons.length} {lang === 'hi' ? 'मंडियां' : 'Markets'}
+                </span>
+              </div>
+            )}
           </div>
         )}
-      </div>
+      </PageContainer>
+
+      {/* Footer with Indicative Price Disclaimer & Attributions */}
+      <AppFooter
+        sourceName={data?.primaryRecord?.source}
+        lang={lang}
+      />
     </div>
   );
 };
